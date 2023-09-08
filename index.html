@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>sum.ai - AI阅读助理</title>
+    <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/css/bootstrap.min.css">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script> <!-- Socket.IO client -->
+    <style>
+        body {
+            background-color: #f5f5f5;
+        }
+        .header-text {
+            color: #4477CE;
+            font-size: 1.8rem;
+        }
+        .sub-header {
+            font-size: 1.5rem;
+            font-weight: bold;
+            color: black;
+            margin-top: 3rem;
+        }
+        .url-label,
+        .copy-text {
+            font-size: 1rem;
+            color: #9E9FA5;
+            margin-bottom: 0;
+            cursor: pointer;
+        }
+        .url-input {
+            border-radius: 25px;
+            border: 1px solid #aaa;
+            box-shadow: 3px 3px 10px #aaa;
+            font-size: 1rem;
+            width: 50%;
+            height: 2.8rem;
+            display: block;
+            margin: 2rem auto;
+        }
+        .generate-button {
+            background-color: #4477CE;
+            border: none;
+            color: white;
+            font-size: 1.2rem;
+            border-radius: 20px;
+            transition: background-color 0.3s, transform 0.3s;
+        }
+        .generate-button:hover {
+            background-color: #1E90FF;
+            transform: scale(1.05);
+        }
+        .generate-button:disabled {
+            background-color: #ccc;
+        }
+        #summary {
+            font-size: 1.1rem;
+            margin-top: 1rem;  /* 增加 margin-top */
+        }
+        @media screen and (max-width: 768px) {
+            .header-text {
+                font-size: 1.8rem;
+            }
+            .sub-header {
+                font-size: 1.7rem;
+                font-weight: bold;
+            }
+            .url-input {
+                width: 95%;
+            }    
+        }
+        #cursor {
+            display: none;
+            animation: blink 1s infinite;
+        }
+        @keyframes blink {
+            50% {
+                opacity: 0;
+            }
+        }
+        .copy-container {
+            margin-top: 1rem;
+        }
+        .summary-container {
+            margin-top: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container text-center py-5">
+        <h1 class="header-text">sum.ai - AI阅读助理</h1>
+        <p class="sub-header mb-4">万字长文？两分钟看完</p>
+        <form id="summary-form">
+            <label for="url" class="url-label">在此输入/黏贴链接 (URL):</label>
+            <input type="text" id="url" name="url" class="url-input">
+            <button type="submit" class="generate-button px-5 py-2 mb-4">生成摘要</button>
+            <div class="copy-container">
+                <div id="copy-text" class="copy-text" style="display:none">复制</div>
+            </div>
+            <div id="status-container" class="mb-4" style="display:block">
+                <p id="status" class="status-text"></p>
+            </div>
+            <div id="progress-container" style="display:none">
+                <progress id="progress-bar" max="100"></progress>
+            </div>            
+        </form>
+        <div class="summary-container">
+            <div id="summary-container"><span id="summary"></span><span id="cursor">|</span></div>
+        </div>
+    </div>
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script>
+        function calculateProgress(message) {
+            let progress = 0;
+            switch (message) {
+                case "收到请求......":
+                    progress = 10;
+                    break;
+                case "正在浏览内容......":
+                    progress = 20;
+                    break;
+                case "正在获取内容......":
+                    progress = 30;
+                    break;
+                case "已成功获取内容，魔法将大约在半分钟后诞生......":
+                    progress = 60;
+                    break;
+                case "摘要生成中......":
+                    progress = 100;
+                    break;
+                default:
+                    progress = 0;
+            }
+            return progress;
+        }
+
+        // 新增的 displaySummary 函数
+        function displaySummary(summary) {
+            console.log(summary);
+            const summaryArray = summary.split("");
+            let index = 0;
+            const summarySpan = document.getElementById('summary'); // 修改这里
+            if (!summarySpan) {
+                console.error("Element with id 'summary' is not available yet."); // 修改这里
+                return;
+            }
+            const cursorSpan = document.getElementById('cursor');
+            console.log("summarySpan:", summarySpan);  // 添加日志
+            console.log("cursorSpan:", cursorSpan);  // 添加日志
+            function displayNextChar() {
+                // 在开始生成每个字符之前显示光标
+                cursorSpan.style.display = 'inline';
+
+                if (index < summaryArray.length) {
+                    summarySpan.innerText += summaryArray[index]; // 修改这里
+                    index++;
+                    setTimeout(displayNextChar, 8);  // 每8毫秒逐字显示
+                } else {
+                    // 在生成完所有字符后隐藏光标
+                    cursorSpan.style.display = 'none';
+                }
+            }
+            displayNextChar();
+        }
+
+        document.addEventListener('DOMContentLoaded', (event) => {
+            var socket = io.connect('http://127.0.0.1:80');
+            
+            socket.on('error', function(data) {
+                alert("发生错误：" + data.error);
+            });
+
+            /*
+            socket.on('summary', function(data) {
+                if(data && data.word) {
+                    var summaryDiv = document.getElementById('summary');
+                    summaryDiv.innerText += data.word;
+                } else {
+                    alert("接收到的数据格式不正确");
+                }
+            });
+            */
+
+            socket.on('connect', function() {
+                console.log('Successfully connected to the server. Session ID:', socket.id);
+            });
+
+            socket.on('disconnect', function() {
+                console.log('Disconnected from the server. Session ID:', socket.id);
+            });
+
+            socket.on('status', function(data) {
+                console.log("Received status event from server:", data);  // 添加这行日志
+                var statusContainer = document.getElementById('status-container');
+                var statusText = document.getElementById('status');
+                var progressBar = document.getElementById('progress-bar');  // 新增这行
+                var progressContainer = document.getElementById('progress-container');  // 新增这行
+
+                statusText.innerText = data.message;
+                statusContainer.style.display = 'block';
+
+                var progress = calculateProgress(data.message);
+                progressBar.value = progress;
+                progressContainer.style.display = 'block';  // 显示进度条
+
+                //$('#status').fadeIn().delay(1000).fadeOut();
+            });
+
+            socket.on('message', function(data) {
+                console.log('Received a message from the server:', data);
+            });
+
+            socket.on('summary_complete', function(data) {
+                var statusContainer = document.getElementById('status-container');
+                statusContainer.style.display = 'none';  // 隐藏状态显示
+                console.log("Received summary data: ", data);  // 新加入的日志
+                console.log("Received complete summary from server");  // 添加日志
+                var button = document.querySelector('.generate-button');  // 注意修正这里
+                var copyText = document.getElementById('copy-text');  // 注意修正这里
+                            
+                if (data && data.summary) {
+                    setTimeout(function() {
+                        displaySummary(data.summary);  // 延迟调用 displaySummary 函数
+                    }, 1000);
+                    button.disabled = false;
+                    button.style.backgroundColor = '#4477CE';
+                    copyText.style.display = 'block';
+                } else {
+                    alert("接收到的摘要数据格式不正确");
+                }
+                document.getElementById('progress-container').style.display = 'none';
+            });
+
+            // 其他代码，例如发送请求生成摘要
+            function requestSummary(url) {
+                socket.emit('generate_summary', {url: url});
+            }
+
+            // 使用全局 Socket.IO 实例发送请求
+            // requestSummary("http://example.com/article");
+
+            document.getElementById('summary-form').addEventListener('submit', function(event) {
+                event.preventDefault();
+                console.log("Form submitted");  // 添加日志
+
+                var url = document.getElementById('url').value;
+                var button = document.querySelector('.generate-button');
+                var copyText = document.getElementById('copy-text');
+                var summaryDiv = document.getElementById('summary');
+                summaryDiv.innerText = '';  // 重置摘要区域
+
+                var statusContainer = document.getElementById('status-container');
+                var statusText = document.getElementById('status');
+                statusText.innerText = '';  // 重置状态文本
+                statusContainer.style.display = 'none';  // 隐藏状态显示
+
+                /*
+                setTimeout(function() {
+                    alert("生成摘要可能需要一些时间，请稍候。");
+                }, 60000);  // 60秒后触发
+                */
+
+                copyText.style.display = 'none';
+                summaryDiv.innerText = '';
+                button.disabled = true;
+                button.style.backgroundColor = '#ccc';
+
+                console.log("Emitting request to generate summary");  // 添加日志    
+                socket.emit('generate_summary', {url: url});
+            });
+
+            document.getElementById('copy-text').addEventListener('click', function() {
+                var summary = document.getElementById('summary').innerText;
+                var textarea = document.createElement('textarea');
+                textarea.value = summary;
+                document.body.appendChild(textarea);
+                textarea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textarea);
+                alert('摘要已复制到剪贴板！');
+            });
+        });
+    </script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.14.7/umd/popper.min.js"></script>
+    <script src="https://stackpath.bootstrapcdn.com/bootstrap/4.3.1/js/bootstrap.min.js"></script>
+</body>
+</html>
